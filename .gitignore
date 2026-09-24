@@ -42,7 +42,8 @@ SAGE_DOCS.md
 
 # env files (catch all variants)
 .env
-.env.*CLAUDE.md
+.env.*
+!.env.example
 
 
 # Local test artifacts

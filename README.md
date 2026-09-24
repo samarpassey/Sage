@@ -1,12 +1,44 @@
 # Sage
 
-A voice-first interview coach. You give it a role, a level, and your resume; it runs a real spoken
-mock interview over WebRTC, adapts its follow-ups to what you actually said, and hands back a
-scored readiness report.
+Sage holds a spoken mock job interview with you, listens to your answers, asks real follow-up
+questions, and gives you back a scored report on how you did.
 
-**Live:** https://www.sageinterview.co
+You give it a role, a level and your resume. It runs the interview out loud in the browser, adapts
+its questions to what you actually said, and writes the report to your account when the call ends.
 
----
+**Live at [sageinterview.co](https://www.sageinterview.co).** One interview needs no account.
+
+## How it works
+
+- **Planning and scoring run on Claude; the live talking runs on Vapi.** `claude-sonnet-4-6` splits
+  the role into three topic areas before the call and writes the scored report after it. The
+  conversational turn itself is `gpt-4.1` inside Vapi's WebRTC bridge, because that path is
+  latency-bound and Vapi owns the audio loop.
+- **Next.js 14 and TypeScript on Vercel, with Clerk for accounts and Supabase for storage.**
+  Completed sessions and their evaluations sit behind Postgres row-level security, and every policy
+  scopes rows to the user who owns them.
+- **No key and no prompt reaches the browser.** The client fetches a 120-second HS256 JWT scoped to
+  one capability and locked to the request origin, instead of holding a long-lived Vapi key. The
+  interview prompt is assembled server-side and the browser never sees it.
+
+<!-- TODO: GIF here - a 20 second clip of a live interview, question through spoken answer. -->
+<!-- TODO: screenshot here - the scored report screen at the end of a session. -->
+
+## Run it
+
+Requires Node 20 or newer, pnpm, and accounts for Clerk, Supabase, Vapi, Anthropic and OpenAI.
+From a clean clone:
+
+```bash
+pnpm install
+pnpm test                    # 16 tests across 3 suites, no keys needed
+cp .env.example .env.local   # fill in the keys listed there
+pnpm dev                     # https://localhost:3000
+```
+
+`pnpm test` runs against mocked model responses, so it passes before any key exists. `pnpm dev`
+serves over HTTPS (`next dev --experimental-https`) because `getUserMedia` needs a secure context.
+Apply the migrations in `supabase/migrations/` to a fresh Supabase project before the first run.
 
 ## How a session runs
 
@@ -37,7 +69,7 @@ Planning and scoring run on Claude via the Anthropic SDK. The live conversationa
 
 **The Vapi key never reaches the browser.** The Web SDK originally needed a long-lived public key
 shipped to the client. It now calls `/api/realtime/vapi-token`, which mints a 120-second HS256 JWT
-scoped to a single capability — web call creation — locked to the request origin, with
+scoped to a single capability, web call creation, locked to the request origin, with
 `allowTransientAssistant` disabled. A leaked token is useless within two minutes and can't be used
 to create arbitrary assistants.
 
@@ -47,7 +79,7 @@ construction lives in `lib/agent/buildVapiSystemPrompt.ts`, called only from
 the instructions, so they can't be read or edited from the client.
 
 **Transcription is primed per interview.** Deepgram consistently misheard resume- and
-JD-specific proper nouns — company names, frameworks, tools it had never encountered. Each session
+JD-specific proper nouns: company names, frameworks, tools it had never encountered. Each session
 now extracts named entities from the interview plan and passes them as Deepgram
 [keyterms](https://developers.deepgram.com/docs/keyterm), so the transcriber is biased toward the
 vocabulary that session will actually contain. Extraction filters sentence-initial verbs and
@@ -62,7 +94,7 @@ anonymous visitor can take one interview without an account. Those routes are ra
 requests/minute, keyed by Clerk user id when present and by IP otherwise.
 
 **Persistence.** Completed sessions and their evaluations are written to Supabase behind row-level
-security — every policy scopes rows to their owning user.
+security. Every policy scopes rows to their owning user.
 
 ## Stack
 
@@ -76,15 +108,15 @@ Anthropic SDK (`claude-sonnet-4-6`, `claude-haiku-4-5`) · OpenAI (`gpt-4.1` via
 pnpm test
 ```
 
-Jest covers the two LLM-backed routes that parse model output — `/api/realtime/initialize` and
-`/api/realtime/conclude` — plus `extractJson`, the tolerant parser both depend on. Model output is
+Jest covers the two LLM-backed routes that parse model output, `/api/realtime/initialize` and
+`/api/realtime/conclude`, plus `extractJson`, the tolerant parser both depend on. Model output is
 the least trustworthy input in the system, so that's where the tests are.
 
 ## Current state
 
 Honest notes, so nothing here is a surprise:
 
-- **`src/app/page.tsx` is 2,189 lines** — the landing page, the live session UI, and the report
+- **`src/app/page.tsx` is 2,189 lines.** The landing page, the live session UI, and the report
   screen all render from it. It's the largest piece of debt in the repo, and it's under a one-way
   ratchet: the contributor rules in `CLAUDE.md` cap new components at ~150 lines and require that
   `page.tsx` only ever shrink. New UI goes to `src/components/interview/`, which is where
@@ -98,15 +130,3 @@ Honest notes, so nothing here is a surprise:
 - **The rate limiter is in-memory**, which means it's per-instance on serverless rather than a true
   distributed limit. Fine for current traffic, wrong shape for real scale.
 
-## Running it
-
-Requires Node 20+, pnpm, and accounts for Clerk, Supabase, Vapi, Anthropic, and OpenAI.
-
-```bash
-pnpm install
-cp .env.example .env.local   # fill in the keys listed there
-pnpm dev                     # https://localhost:3000
-```
-
-Dev runs over HTTPS (`next dev --experimental-https`) because `getUserMedia` requires a secure
-context. Apply the migrations in `supabase/migrations/` to a fresh Supabase project before first run.
